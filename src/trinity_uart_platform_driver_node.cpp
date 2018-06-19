@@ -32,7 +32,6 @@ TrinityPlatfromUartDriver::TrinityPlatfromUartDriver(const ros::NodeHandle &nh)
 	//Subscriber
 	m_subTwist     = m_nh.subscribe<geometry_msgs::Twist>("cmd_vel",1,&TrinityPlatfromUartDriver::onTwistCb,this);
 	m_subSingleParamSetting = m_nh.subscribe<trinity_platform_msgs::SingleParamSetting>("singleParamSetting",1,&TrinityPlatfromUartDriver::onSingleParamSettingCb,this);
-	m_subTts       = m_nh.subscribe<trinity_platform_msgs::TrinityTts>("tts",1,&TrinityPlatfromUartDriver::onTrinityTtsCb,this);
 	
 	//Publisher  
 	m_pubTrinityOdom = m_nh.advertise<trinity_platform_msgs::TrinityOdom>("trinityOdom",1);
@@ -375,118 +374,6 @@ void TrinityPlatfromUartDriver::onSingleParamSettingCb(const trinity_platform_ms
 
 	boost::mutex::scoped_lock lock(m_ttsStatusMutex);
 	uart_send(m_uartHd,paramBuffer.get(),13);*/
-}
-
-void TrinityPlatfromUartDriver::onTrinityTtsCb(const trinity_platform_msgs::TrinityTts::ConstPtr &msg)
-{
-	//判断是否是语音合成消息
-	if(trinity_platform_msgs::TrinityTts::COMMAND_PLAY != msg->command_type)
-	{
-		//其它命令消息
-		/*int length = 4;
-		boost::shared_array<char>buffer = boost::shared_array<char>(new char[length]);
-		//帧头(1-byte)
-		buffer[0] = SYNC_HEAD;
-
-		//数据区长度(2-bytes),大端字节序
-		buffer[1] = 0x00;
-		buffer[2] = 0x01;
-
-		//命令字
-		buffer[3] = msg->command_type;
-
-		uart_send(m_uartHd,buffer.get(),4);*/
-	}
-	else
-	{
-		//将UTF-8编码的转化为gbk编码
-		char gbkbuf[1024*4];
-		char tmpbuf[1024*4];
-		memcpy(tmpbuf,msg->text.c_str(),msg->text.length());
-        	CodingConversion::u2g(tmpbuf, msg->text.length(), gbkbuf, sizeof(gbkbuf));
-		
-		//判断芯片的状态
-		boost::mutex::scoped_lock lock(m_ttsStatusMutex);
-		if(m_ttsStatus == FREE)         //芯片空闲
-		{
-			int length = strlen(gbkbuf)/*msg->text.length()*/ + 10;
-			ROS_INFO("text length: %d",(int)msg->text.length());
-			boost::shared_array<char>buffer = boost::shared_array<char>(new char[length]);
-			//帧头(1-byte)
-			buffer[0] = SYNC_FLAG_START;
- 			buffer[1] = MOTION_DEVICE_TYPE;
-			buffer[2] = MOTION_DEVICE_ADDRESS;
-
-			buffer[3] = 0x24;   //TTS Play
-			//数据区长度(2-bytes)
-			char* lengthBytes = trinity_platform::int162bytes(strlen(gbkbuf) + 1);
-			buffer[4] = lengthBytes[0];
-			buffer[5] = lengthBytes[1];
-
-			//命令参数
-			buffer[6] = msg->param_type;
-		
-			//待发送文本
-			memcpy(buffer.get()+7,gbkbuf,strlen(gbkbuf));//待发送文本
-
-			//CRC检校
-			uint16_t crcValue = getCks((uint8_t*)(buffer.get()),strlen(gbkbuf) + 7);
-			char* crc = trinity_platform::int162bytes(crcValue);
-			memcpy(buffer.get()+7+strlen(gbkbuf),crc,2);
-			
-			buffer[length-1] = SYNC_FLAG_END;
-
-			/*for(int i=0;i<length;i++)
-				ROS_INFO("%2X",buffer[i]);*/
-
-			uart_send(m_uartHd,buffer.get(),length);
-			
-		}
-		else if(m_ttsStatus == STANDBY)
-		{
-			/*ROS_WARN("Unique tts is sleeping now, wakeup first!");
-			//唤醒芯片
-			boost::shared_array<char>wakeupBuffer = boost::shared_array<char>(new char[4]);
-			
-			wakeupBuffer[0] = SYNC_HEAD;//帧头(1-byte)
-			wakeupBuffer[1] = 0x00;//数据区长度(2-bytes),大端字节序
-			wakeupBuffer[2] = 0x01;
-			wakeupBuffer[3] = unique_tts::TrinityTts::COMMAND_WAKEUP;//命令字(唤醒)
-			uart_send(m_uartHd,wakeupBuffer.get(),4);
-
-			ros::Duration(0.001).sleep();
-			//检查芯片是否唤醒
-			
-
-			//发送语音
-			int length = strlen(gbkbuf) + 5;
-			boost::shared_array<char>buffer = boost::shared_array<char>(new char[length]);
-			buffer[0] = SYNC_HEAD;//帧头(1-byte)
-			char* lengthBytes = int162bytes(strlen(gbkbuf) + 2,false);//数据区长度(2-bytes)
-			buffer[1] = lengthBytes[0];
-			buffer[2] = lengthBytes[1];
-			buffer[3] = msg->command_type;//命令字
-			buffer[4] = msg->param_type;//命令参数
-			memcpy(buffer.get()+5,gbkbuf,strlen(gbkbuf));//待发送文本
-			uart_send(m_uartHd,buffer.get(),length);*/			
-		}
-		else//芯片处于忙碌状态
-		{
-			ROS_WARN("Unique tts is busy!");
-			//发送语音
-			/*int length = strlen(gbkbuf) + 5;
-			boost::shared_array<char>buffer = boost::shared_array<char>(new char[length]);
-			buffer[0] = SYNC_HEAD;//帧头(1-byte)
-			char* lengthBytes = int162bytes(strlen(gbkbuf) + 2,false);//数据区长度(2-bytes)
-			buffer[1] = lengthBytes[0];
-			buffer[2] = lengthBytes[1];
-			buffer[3] = msg->command_type;//命令字
-			buffer[4] = msg->param_type;//命令参数
-			memcpy(buffer.get()+5,gbkbuf,strlen(gbkbuf));//待发送文本
-			uart_send(m_uartHd,buffer.get(),length);*/	
-		}
-		
-	}
 }
 
 

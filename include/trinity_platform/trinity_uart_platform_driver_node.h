@@ -51,7 +51,6 @@ protected:
 	void onCmdvelTimerEvent(const ros::TimerEvent &e);
         void onHeartBeatTimerEvent(const ros::TimerEvent &e);
 	void onSingleParamSettingCb(const trinity_platform_msgs::SingleParamSetting::ConstPtr &msg);
-	void onTrinityTtsCb(const trinity_platform_msgs::TrinityTts::ConstPtr &msg);
 
 
 public:
@@ -59,7 +58,7 @@ public:
 
 private:
 	ros::NodeHandle m_nh;
-	ros::Subscriber m_subTwist,m_subCommand,m_subSingleParamSetting,m_subTts;
+	ros::Subscriber m_subTwist,m_subCommand,m_subSingleParamSetting;
 
 	static ros::Publisher m_pubTrinityOdom, m_pubMpu6050Pose, m_pubMpu6050Raw;
 

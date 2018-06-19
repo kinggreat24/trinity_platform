@@ -47,7 +47,11 @@ int main(int argc, char* argv[])
 	}
 
 	signal(SIGINT,onRosShutdown);
-	ros::spin();
+	//ros::spin();
+
+	ros::AsyncSpinner spinner(4);
+	spinner.start();
+	ros::waitForShutdown();
 	return 0;
 
 }
