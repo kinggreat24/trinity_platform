@@ -1,0 +1,6 @@
+<launch>
+	<node name="trinity_platform_node" pkg="trinity_platform" type="trinity_platform_node" output="screen">
+		<param name="trinity_uart_port" value="/dev/ttyUSB1" type="string"/>
+		<param name="trinity_uart_baudrate" value="115200" type="int"/>	
+	</node>
+</launch>

@@ -1,0 +1,244 @@
+#include "hangfa_uart_platform/hangfa_uart_platform_driver_node.h"
+#include "hangfa_uart_platform/tool.h"
+#include "hangfa_uart_platform/type.h"
+
+#include <boost/shared_ptr.hpp>
+#include <boost/smart_ptr.hpp>
+#include <iostream>
+
+using namespace trinity_platform;
+
+UART_HANDLE TrinityPlatfromUartDriver::m_uartHd;
+
+boost::mutex TrinityPlatfromUartDriver::m_ttsStatusMutex;
+
+std::vector<char> TrinityPlatfromUartDriver::m_bigbuf;
+
+int TrinityPlatfromUartDriver::m_recvIndex = 0;
+
+int TrinityPlatfromUartDriver::m_packageLength = 0;
+
+
+
+TrinityPlatfromUartDriver::TrinityPlatfromUartDriver(const ros::NodeHandle &nh)
+	:m_nh(nh)
+{
+	//Subscriber
+	m_subTwist     = m_nh.subscribe<geometry_msgs::Twist>("cmd_vel",1,&TrinityPlatfromUartDriver::onTwistCb,this);
+	m_subCommand   = m_nh.subscribe<trinity_platform_msgs::HangfaCommand>("trinity_command",1,&TrinityPlatfromUartDriver::onTrinityCommandCb,this);
+	m_subSingleParamSetting = m_nh.subscribe<trinity_platform_msgs::SingleParamSetting>("singleParamSetting",1,&TrinityPlatfromUartDriver::onSingleParamSettingCb,this);
+
+	
+	//Publisher  
+
+	//TimerEvent
+	m_cmdvel_timer = m_nh.createTimer(ros::Duration(0.5),&TrinityPlatfromUartDriver::onCmdvelTimerEvent,this);
+
+
+
+	//Param init
+	m_current_cmdvel = boost::shared_ptr<const geometry_msgs::Twist>(new geometry_msgs::Twist());
+
+	m_bigbuf.clear();
+	m_isAutoCharging = false;
+}
+
+
+TrinityPlatfromUartDriver::~TrinityPlatfromUartDriver()
+{
+
+}
+
+
+
+void TrinityPlatfromUartDriver::onMessageProcess(const char* buf, const int len)
+{
+	if(!cksCheck(buf,len))
+		return;
+
+	//解析数据
+	unsigned char command_type = buf[3];
+	//ROS_INFO("command_type: %d",command_type);
+	switch(command_type)
+	{
+		
+	}
+}
+
+
+
+bool TrinityPlatfromUartDriver::cksCheck(const char* buffer,const int length)
+{
+	uint16_t crc = bytes2int16(buffer+length-3);
+	if(crc == getCks((const uint8_t*)buffer,length-3))
+	{	
+		return true;
+	}
+	else
+	{	
+		return false;
+	}
+}
+
+
+
+void TrinityPlatfromUartDriver::uartRec(const void *msg, unsigned int msglen, void *user_data)
+{
+	if(0 == m_bigbuf.size())
+	{
+		for(int i=0;i<msglen;i++)
+		{
+			if(((unsigned char*)msg)[i] == SYNC_FLAG_START)
+			{
+				m_bigbuf.push_back(((unsigned char*)msg)[i]);
+				m_recvIndex += 1;
+			}
+			else
+			{
+				if(m_recvIndex > 0)
+				{
+					//已经接收到数据头，开始将数据添加到容器中
+					m_bigbuf.push_back(((unsigned char*)msg)[i]);
+					m_recvIndex += 1;
+
+					if(5 == m_recvIndex)
+					{
+						m_packageLength = ((unsigned char*)msg)[i];
+					}
+					
+					if(m_packageLength+8 == m_recvIndex)
+					{
+						//读到一帧完整的数据
+						onMessageProcess(m_bigbuf.data(),m_bigbuf.size());
+
+						//标识符还原
+						m_recvIndex = 0;
+						m_packageLength = 0;
+						m_bigbuf.clear();
+					}
+				}
+				else
+				{
+					//没有接收到数据头
+					ROS_INFO("Drop this byte %x.",((unsigned char*)msg)[i]);
+				}
+			}
+		}
+	}
+	else
+	{
+		for(int i=0;i<msglen;i++)
+		{
+			m_bigbuf.push_back(((unsigned char*)msg)[i]);
+			m_recvIndex += 1;
+
+			if(5 == m_recvIndex)
+			{
+				m_packageLength = ((unsigned char*)msg)[i];
+			}
+			
+			if(m_packageLength+8 == m_recvIndex)
+			{
+				//读到一帧完整的数据
+				onMessageProcess(m_bigbuf.data(),m_bigbuf.size());
+
+				//标识符还原
+				m_recvIndex = 0;
+				m_packageLength = 0;
+				m_bigbuf.clear();
+			}
+		}
+	}
+}
+
+
+
+
+
+//更新当前的速度
+void TrinityPlatfromUartDriver::onTwistCb(const geometry_msgs::Twist::ConstPtr &msg)
+{
+	//ROS_INFO("update cmdvel");
+	m_current_cmdvel = boost::shared_ptr<const geometry_msgs::Twist>(msg);
+}
+
+
+
+//将当前的速度以一定的频率发送到运动控制器
+void TrinityPlatfromUartDriver::onCmdvelTimerEvent(const ros::TimerEvent &e)
+{
+	
+	//ROS_INFO("Real time control mode.");
+	/*boost::shared_array<char> cmdvelBuffer(new char[14]);
+
+	cmdvelBuffer[0] = SYNC_FLAG_START;
+	cmdvelBuffer[1] = MOTION_DEVICE_TYPE;
+	cmdvelBuffer[2] = MOTION_DEVICE_ADDRESS;
+
+	cmdvelBuffer[3] = 0x37; //实时速度控制	
+	cmdvelBuffer[4] = 0x06; //长度
+
+	//运动方向
+	char* orientation = hangfa_platform::int162bytes(90);
+	memcpy(cmdvelBuffer.get()+5,orientation,2);
+
+	//线速度
+	char* linearSpeed = hangfa_platform::int162bytes(static_cast<int>(m_current_cmdvel->linear.x*10000));
+	memcpy(cmdvelBuffer.get()+7,linearSpeed,2);
+
+	//角速度
+	char* angularSpeed = hangfa_platform::int162bytes(static_cast<int>(m_current_cmdvel->angular.z*100));
+	memcpy(cmdvelBuffer.get()+9,angularSpeed,2);
+
+	//CRC检校
+	uint16_t crcValue = getCks((uint8_t*)(cmdvelBuffer.get()),11);
+	char* crc = hangfa_platform::int162bytes(crcValue);
+	memcpy(cmdvelBuffer.get()+11,crc,2);
+
+	cmdvelBuffer[13] = SYNC_FLAG_END;
+
+	boost::mutex::scoped_lock lock(m_ttsStatusMutex);
+	uart_send(m_uartHd,cmdvelBuffer.get(),14);
+#ifdef HANGFA_UART_DEBUG	
+	for(int i=0;i<14;i++)
+		ROS_INFO("%2X",cmdvelBuffer[i]);
+#endif//HANGFA_UART_DEBUG
+	break;*/
+		
+	
+}
+
+
+
+/*设置单个参数设置*/
+void TrinityPlatfromUartDriver::onSingleParamSettingCb(const hangfa_uart_platform::SingleParamSetting::ConstPtr &msg)
+{
+	boost::shared_array<char> paramBuffer(new char[13]);
+
+	//Header
+	paramBuffer[0] = SYNC_FLAG_START;
+ 	paramBuffer[1] = MOTION_DEVICE_TYPE;
+	paramBuffer[2] = MOTION_DEVICE_ADDRESS;
+
+	//Command
+	paramBuffer[3] = 0x1E;
+
+	//Length
+	paramBuffer[4] = 0x05;
+
+	//Data
+	paramBuffer[5] = msg->index;
+	char* paramData = hangfa_platform::int322bytes(msg->data);
+	memcpy(paramBuffer.get()+6,paramData,4);
+
+	//CRC check
+	uint16_t crcValue = getCks((uint8_t*)(paramBuffer.get()),10);
+	char* crc = hangfa_platform::int162bytes(crcValue);
+	memcpy(paramBuffer.get()+10,crc,2);
+
+	paramBuffer[12] = SYNC_FLAG_END;
+
+	boost::mutex::scoped_lock lock(m_ttsStatusMutex);
+	uart_send(m_uartHd,paramBuffer.get(),13);
+}
+
