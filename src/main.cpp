@@ -12,9 +12,7 @@
 //ros
 #include <ros/ros.h>
 
-
 using namespace trinity_platform;
-
 
 void onRosShutdown(int sig)
 {
