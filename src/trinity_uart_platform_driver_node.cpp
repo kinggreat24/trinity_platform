@@ -347,7 +347,7 @@ void TrinityPlatfromUartDriver::onHeartBeatTimerEvent(const ros::TimerEvent &e)
 /*设置单个参数设置*/
 void TrinityPlatfromUartDriver::onSingleParamSettingCb(const trinity_platform_msgs::SingleParamSetting::ConstPtr &msg)
 {
-	/*boost::shared_array<char> paramBuffer(new char[13]);
+	boost::shared_array<char> paramBuffer(new char[14]);
 
 	//Header
 	paramBuffer[0] = SYNC_FLAG_START;
@@ -358,22 +358,23 @@ void TrinityPlatfromUartDriver::onSingleParamSettingCb(const trinity_platform_ms
 	paramBuffer[3] = 0x1E;
 
 	//Length
-	paramBuffer[4] = 0x05;
+	paramBuffer[4] = 0x0D;
+	paramBuffer[5] = 0x00;
 
 	//Data
-	paramBuffer[5] = msg->index;
+	paramBuffer[6] = msg->index;
 	char* paramData = hangfa_platform::int322bytes(msg->data);
-	memcpy(paramBuffer.get()+6,paramData,4);
+	memcpy(paramBuffer.get()+7,paramData,4);
 
 	//CRC check
-	uint16_t crcValue = getCks((uint8_t*)(paramBuffer.get()),10);
+	uint16_t crcValue = getCks((uint8_t*)(paramBuffer.get()),11);
 	char* crc = hangfa_platform::int162bytes(crcValue);
-	memcpy(paramBuffer.get()+10,crc,2);
+	memcpy(paramBuffer.get()+11,crc,2);
 
-	paramBuffer[12] = SYNC_FLAG_END;
+	paramBuffer[13] = SYNC_FLAG_END;
 
 	boost::mutex::scoped_lock lock(m_ttsStatusMutex);
-	uart_send(m_uartHd,paramBuffer.get(),13);*/
+	uart_send(m_uartHd,paramBuffer.get(),14);
 }
 
 
