@@ -25,11 +25,13 @@
 
 //公共命令相关
 #include "trinity_platform_msgs/SingleParamSetting.h"
-
 #include "trinity_platform_msgs/TrinityOdom.h"
 #include "trinity_platform_msgs/MPU6050PoseData.h"
 #include "trinity_platform_msgs/MPU6050RawData.h"
 #include "trinity_platform_msgs/TrinityTts.h"
+
+
+#define MAX_HEARTBEAT_TIME 10
 
 namespace trinity_platform{
 
@@ -66,21 +68,21 @@ private:
 	static int m_recvIndex;                   //接收到的数据的个数
 	static int m_packageLength;
 
-	bool m_isAutoCharging;
-	int m_controllerType;
-	int m_maxSpeed;
-	static boost::mutex m_ttsStatusMutex;
+
+	static boost::mutex m_uartSendMutex;
 	boost::shared_ptr<const geometry_msgs::Twist> m_current_cmdvel;
 	ros::Timer m_cmdvel_timer;
 	ros::Timer m_heartbeat_timer;
-
-	TTS_STATUS m_ttsStatus;
 	
 	static ros::Time lastSyncTime_;             //上次接收到的时间
-	uart_rec_fn m_uartRecvCb_;                  //串口接收回调函数
+	uart_rec_fn m_uartRecvCb_;                  //串口接收回调函数	
+	int m_heaerbeat_count_;
+
 
 	char* m_portName_;
 	int m_baudrate_;
+
+	bool m_isConnected_;                         //串口连接是否成功
 };
 
 }

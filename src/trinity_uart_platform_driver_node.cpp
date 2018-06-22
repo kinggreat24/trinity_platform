@@ -13,7 +13,7 @@ using namespace trinity_platform;
 
 UART_HANDLE TrinityPlatfromUartDriver::m_uartHd;
 
-boost::mutex TrinityPlatfromUartDriver::m_ttsStatusMutex;
+boost::mutex TrinityPlatfromUartDriver::m_uartSendMutex;
 
 std::vector<char> TrinityPlatfromUartDriver::m_bigbuf;
 
@@ -28,6 +28,8 @@ ros::Publisher TrinityPlatfromUartDriver::m_pubTrinityOdom, TrinityPlatfromUartD
 
 TrinityPlatfromUartDriver::TrinityPlatfromUartDriver(const ros::NodeHandle &nh)
 	:m_nh(nh)
+	,m_heaerbeat_count_(0)
+	,m_isConnected_(false)
 {
 	//Subscriber
 	m_subTwist     = m_nh.subscribe<geometry_msgs::Twist>("cmd_vel",1,&TrinityPlatfromUartDriver::onTwistCb,this);
@@ -49,9 +51,7 @@ TrinityPlatfromUartDriver::TrinityPlatfromUartDriver(const ros::NodeHandle &nh)
 	m_current_cmdvel = boost::shared_ptr<const geometry_msgs::Twist>(new geometry_msgs::Twist());
 
 
-	m_ttsStatus = FREE;
 	m_bigbuf.clear();
-	m_isAutoCharging = false;
 }
 
 
@@ -265,7 +265,16 @@ int TrinityPlatfromUartDriver::trinityPlatformInit(const char *device, int rate,
 	m_baudrate_ = rate;
 	m_uartRecvCb_ = uart_rec_cb;
 
-	return uart_init(&m_uartHd, m_portName_,m_baudrate_,m_uartRecvCb_, NULL);
+	int ret = uart_init(&m_uartHd, m_portName_,m_baudrate_,m_uartRecvCb_, NULL);
+	if (0 != ret)
+	{
+		printf("uart_init error ret = %d\n", ret);
+		m_isConnected_ = false;
+	}
+	else 
+		m_isConnected_ = true;
+
+	return ret;
 }
 
 
@@ -282,7 +291,9 @@ void TrinityPlatfromUartDriver::onTwistCb(const geometry_msgs::Twist::ConstPtr &
 //将当前的速度以一定的频率发送到运动控制器
 void TrinityPlatfromUartDriver::onCmdvelTimerEvent(const ros::TimerEvent &e)
 {
-	
+	if(!m_isConnected_)	
+		return;
+
 	//ROS_INFO("Real time control mode.");
 	boost::shared_array<char> cmdvelBuffer(new char[17]);
 
@@ -315,21 +326,61 @@ void TrinityPlatfromUartDriver::onCmdvelTimerEvent(const ros::TimerEvent &e)
 
 	cmdvelBuffer[16] = SYNC_FLAG_END;
 
-	boost::mutex::scoped_lock lock(m_ttsStatusMutex);
-	uart_send(m_uartHd,cmdvelBuffer.get(),17);
+	boost::mutex::scoped_lock lock(m_uartSendMutex);
+	if(m_isConnected_)
+		uart_send(m_uartHd,cmdvelBuffer.get(),17);
+
 //#ifdef HANGFA_UART_DEBUG	
 	for(int i=0;i<17;i++)
 		ROS_INFO("%2X",cmdvelBuffer[i]);
 //#endif//HANGFA_UART_DEBUG
 }
 
+
+
+
+
+
+//发送心跳包
 void TrinityPlatfromUartDriver::onHeartBeatTimerEvent(const ros::TimerEvent &e)
 {
-	if((ros::Time::now() - lastSyncTime_).toSec() >  SYNC_SECONDS)
+	boost::shared_array<char> heartbeatBuffer(new char[17]);
+
+	heartbeatBuffer[0] = SYNC_FLAG_START;
+	heartbeatBuffer[1] = MOTION_DEVICE_TYPE;
+	heartbeatBuffer[2] = MOTION_DEVICE_ADDRESS;
+
+	heartbeatBuffer[3] = 0xFE; //实时速度控制
+
+		
+	heartbeatBuffer[4] = 0x08; //长度
+	heartbeatBuffer[5] = 0x00; //长度
+	
+	
+	char* sec = trinity_platform::int322bytes(ros::Time::now().sec);
+	memcpy(heartbeatBuffer.get()+6,sec,4);
+
+	char* nsec = trinity_platform::int322bytes(ros::Time::now().nsec);
+	memcpy(heartbeatBuffer.get()+10,nsec,4);
+
+
+	//CRC检校
+	uint16_t crcValue = getCks((uint8_t*)(heartbeatBuffer.get()),14);
+	char* crc = trinity_platform::int162bytes(crcValue);
+	memcpy(heartbeatBuffer.get()+14,crc,2);
+
+	heartbeatBuffer[16] = SYNC_FLAG_END;
+
+	boost::mutex::scoped_lock lock(m_uartSendMutex);
+	if(m_isConnected_)
+		uart_send(m_uartHd,heartbeatBuffer.get(),17);
+
+
+	if( (ros::Time::now() - lastSyncTime_).toSec () > MAX_HEARTBEAT_TIME)
 	{
-		//time out, restart 
 		ROS_ERROR("Lost syncing, closing...");
 		uart_uninit(&TrinityPlatfromUartDriver::m_uartHd);
+		m_isConnected_ = false;
 		ros::Duration(3.0).sleep();
 
 		
@@ -362,18 +413,18 @@ void TrinityPlatfromUartDriver::onSingleParamSettingCb(const trinity_platform_ms
 	paramBuffer[5] = 0x00;
 
 	//Data
-	paramBuffer[6] = msg->index;
-	char* paramData = hangfa_platform::int322bytes(msg->data);
+	paramBuffer[6] = msg->id;
+	char* paramData = trinity_platform::int322bytes(msg->data);
 	memcpy(paramBuffer.get()+7,paramData,4);
 
 	//CRC check
 	uint16_t crcValue = getCks((uint8_t*)(paramBuffer.get()),11);
-	char* crc = hangfa_platform::int162bytes(crcValue);
+	char* crc = trinity_platform::int162bytes(crcValue);
 	memcpy(paramBuffer.get()+11,crc,2);
 
 	paramBuffer[13] = SYNC_FLAG_END;
 
-	boost::mutex::scoped_lock lock(m_ttsStatusMutex);
+	boost::mutex::scoped_lock lock(m_uartSendMutex);
 	uart_send(m_uartHd,paramBuffer.get(),14);
 }
 
